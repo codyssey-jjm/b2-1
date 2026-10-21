@@ -1,13 +1,15 @@
 """입력·출력과 분리한 카테고리·거래 업무 처리."""
 
+from collections.abc import Generator
 from contextlib import closing
 from dataclasses import replace
+from datetime import date
 from typing import Any
 
 from .errors import AppError, ValidationError
-from .models import Transaction
+from .models import Transaction, TransactionType
 from .repositories import CategoryStore, TransactionRepository
-from .validators import validate_nonempty, validate_registered_category
+from .validators import validate_date_range, validate_nonempty, validate_registered_category
 
 
 def add_transaction(
@@ -38,6 +40,32 @@ def delete_transaction(transaction_id: str, transactions: TransactionRepository)
     validate_nonempty(transaction_id, "거래 ID")
     transactions.delete(transaction_id)
     return transaction_id
+
+
+def search_transactions(
+    categories: CategoryStore, transactions: TransactionRepository, *,
+    start_date: date | None = None, end_date: date | None = None,
+    category: str | None = None, transaction_type: TransactionType | None = None,
+    query: str | None = None, tag: str | None = None,
+) -> Generator[Transaction, None, None]:
+    validate_date_range(start_date, end_date)
+    if category is not None:
+        validate_registered_category(category, categories.load())
+    with closing(transactions.iter_transactions()) as existing:
+        for transaction in existing:
+            if start_date is not None and transaction.date < start_date:
+                continue
+            if end_date is not None and transaction.date > end_date:
+                continue
+            if category is not None and transaction.category != category:
+                continue
+            if transaction_type is not None and transaction.type != transaction_type:
+                continue
+            if query is not None and query not in transaction.memo:
+                continue
+            if tag is not None and tag not in transaction.tags:
+                continue
+            yield transaction
 
 
 def add_category(name: str, categories: CategoryStore) -> str:

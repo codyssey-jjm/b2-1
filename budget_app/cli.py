@@ -12,11 +12,12 @@ from .errors import ValidationError
 from .models import Transaction
 from .repositories import CategoryStore, TransactionRepository, initialize_stores
 from .services import (
-    add_category, add_transaction, delete_transaction, remove_category, update_transaction,
+    add_category, add_transaction, delete_transaction, remove_category,
+    search_transactions, update_transaction,
 )
 from .validators import (
     parse_date, parse_positive_int, parse_tags,
-    validate_nonempty, validate_registered_category, validate_transaction_type,
+    validate_date_range, validate_nonempty, validate_registered_category, validate_transaction_type,
 )
 
 
@@ -112,6 +113,33 @@ def main(argv: list[str] | None) -> int:
         "--id", required=True, metavar="ID", help="삭제할 거래 ID입니다.",
     )
 
+    searching = commands.add_parser(
+        "search", help="조건에 맞는 거래를 최신순으로 검색합니다.",
+        description="지정한 조건을 모두 적용합니다. 조건이 없으면 전체 거래를 조회합니다.",
+    )
+    search_options = searching.add_argument_group("검색 조건")
+    search_options.add_argument(
+        "--from", dest="start_date", type=parse_date, metavar="YYYY-MM-DD",
+        help="시작일입니다. 해당 날짜를 포함합니다.",
+    )
+    search_options.add_argument(
+        "--to", dest="end_date", type=parse_date, metavar="YYYY-MM-DD",
+        help="종료일입니다. 해당 날짜를 포함합니다.",
+    )
+    search_options.add_argument(
+        "--category", metavar="이름", help="등록된 카테고리와 정확히 일치하는 거래를 찾습니다.",
+    )
+    search_options.add_argument(
+        "--type", type=validate_transaction_type, metavar="income/expense",
+        help="거래 타입을 지정합니다.",
+    )
+    search_options.add_argument(
+        "--q", metavar="검색어", help="메모에 포함된 문자열을 찾습니다. 대소문자를 구분합니다.",
+    )
+    search_options.add_argument(
+        "--tag", metavar="태그", help="태그 한 개와 정확히 일치하는 거래를 찾습니다. 대소문자를 구분합니다.",
+    )
+
     args = parser.parse_args(argv)
     if args.command is None:
         parser.print_help()
@@ -132,6 +160,14 @@ def main(argv: list[str] | None) -> int:
             )
         if args.category is not None:
             validate_nonempty(args.category, "카테고리")
+
+    if args.command == "search":
+        validate_date_range(args.start_date, args.end_date)
+        for value, field_name in (
+            (args.category, "카테고리"), (args.q, "메모 검색어"), (args.tag, "태그"),
+        ):
+            if value is not None:
+                validate_nonempty(value, field_name)
 
     initialize_stores(args.data_dir)
     categories = CategoryStore(args.data_dir)
@@ -155,19 +191,28 @@ def main(argv: list[str] | None) -> int:
             categories, transactions,
         )
         print(f"[저장 완료] id={transaction_id}")
-    elif args.command == "list":
+    elif args.command in {"list", "search"}:
+        if args.command == "search":
+            results = search_transactions(
+                categories, transactions, start_date=args.start_date, end_date=args.end_date,
+                category=args.category, transaction_type=args.type, query=args.q, tag=args.tag,
+            )
+            limit = None
+        else:
+            results = transactions.iter_transactions()
+            limit = args.limit
         count = 0
-        with closing(transactions.iter_transactions()) as existing:
+        with closing(results) as existing:
             for count, transaction in enumerate(existing, 1):
                 print(
                     f"{transaction.id} | {transaction.date.isoformat()} | {transaction.type} | "
                     f"{transaction.category} | {transaction.amount} | {transaction.memo} | "
                     f"{', '.join(transaction.tags)}"
                 )
-                if count >= args.limit:
+                if limit is not None and count >= limit:
                     break
         if count == 0:
-            print("거래 내역이 없습니다.")
+            print("조건에 맞는 거래가 없습니다." if args.command == "search" else "거래 내역이 없습니다.")
     elif args.command == "update":
         transaction_id = update_transaction(args.id, changes, categories, transactions)
         print(f"[수정 완료] id={transaction_id}")

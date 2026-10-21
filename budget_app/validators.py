@@ -30,6 +30,14 @@ def parse_date(value: str) -> date:
         ) from None
 
 
+def validate_date_range(start_date: date | None, end_date: date | None) -> None:
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise ValidationError(
+            "시작일은 종료일보다 늦을 수 없습니다.",
+            "--from과 --to를 확인하고 시작일을 종료일 이전 또는 같은 날짜로 지정하세요.",
+        )
+
+
 def validate_month(value: str) -> None:
     try:
         if (
