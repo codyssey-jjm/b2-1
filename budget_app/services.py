@@ -9,7 +9,9 @@ from typing import Any
 from .errors import AppError, ValidationError
 from .models import Transaction, TransactionType
 from .repositories import CategoryStore, TransactionRepository
-from .validators import validate_date_range, validate_nonempty, validate_registered_category
+from .validators import (
+    validate_date_range, validate_month, validate_nonempty, validate_registered_category,
+)
 
 
 def add_transaction(
@@ -66,6 +68,27 @@ def search_transactions(
             if tag is not None and tag not in transaction.tags:
                 continue
             yield transaction
+
+
+def summarize_month(
+    month: str, transactions: TransactionRepository,
+) -> tuple[int, int, dict[str, int]]:
+    validate_month(month)
+    total_income = 0
+    total_expense = 0
+    expense_by_category: dict[str, int] = {}
+    with closing(transactions.iter_transactions()) as existing:
+        for transaction in existing:
+            if transaction.date.isoformat()[:7] != month:
+                continue
+            if transaction.type == "income":
+                total_income += transaction.amount
+            else:
+                total_expense += transaction.amount
+                expense_by_category[transaction.category] = (
+                    expense_by_category.get(transaction.category, 0) + transaction.amount
+                )
+    return total_income, total_expense, expense_by_category
 
 
 def add_category(name: str, categories: CategoryStore) -> str:

@@ -13,11 +13,12 @@ from .models import Transaction
 from .repositories import CategoryStore, TransactionRepository, initialize_stores
 from .services import (
     add_category, add_transaction, delete_transaction, remove_category,
-    search_transactions, update_transaction,
+    search_transactions, summarize_month, update_transaction,
 )
 from .validators import (
     parse_date, parse_positive_int, parse_tags,
-    validate_date_range, validate_nonempty, validate_registered_category, validate_transaction_type,
+    validate_date_range, validate_month, validate_nonempty,
+    validate_registered_category, validate_transaction_type,
 )
 
 
@@ -140,6 +141,19 @@ def main(argv: list[str] | None) -> int:
         "--tag", metavar="태그", help="태그 한 개와 정확히 일치하는 거래를 찾습니다. 대소문자를 구분합니다.",
     )
 
+    summary = commands.add_parser(
+        "summary", help="월별 합계와 카테고리별 지출 순위를 조회합니다.",
+        description="지정한 월의 총수입·총지출·잔액과 지출 TOP N을 출력합니다.",
+    )
+    summary_options = summary.add_argument_group("요약 옵션")
+    summary_options.add_argument(
+        "--month", required=True, metavar="YYYY-MM", help="조회할 월입니다.",
+    )
+    summary_options.add_argument(
+        "--top", type=parse_positive_int, default=5, metavar="N",
+        help="출력할 최대 지출 카테고리 수입니다. 양수 정수, 기본값: 5. 동률은 이름순입니다.",
+    )
+
     args = parser.parse_args(argv)
     if args.command is None:
         parser.print_help()
@@ -168,6 +182,9 @@ def main(argv: list[str] | None) -> int:
         ):
             if value is not None:
                 validate_nonempty(value, field_name)
+
+    if args.command == "summary":
+        validate_month(args.month)
 
     initialize_stores(args.data_dir)
     categories = CategoryStore(args.data_dir)
@@ -213,6 +230,23 @@ def main(argv: list[str] | None) -> int:
                     break
         if count == 0:
             print("조건에 맞는 거래가 없습니다." if args.command == "search" else "거래 내역이 없습니다.")
+    elif args.command == "summary":
+        total_income, total_expense, expense_by_category = summarize_month(args.month, transactions)
+        if total_income == 0 and total_expense == 0:
+            print(f"{args.month} 거래 데이터가 없습니다.")
+        else:
+            print(f"총 수입: {total_income}원")
+            print(f"총 지출: {total_expense}원")
+            print(f"잔액: {total_income - total_expense}원")
+            if expense_by_category:
+                ranked = sorted(
+                    expense_by_category.items(), key=lambda item: (-item[1], item[0]),
+                )[:args.top]
+                print(f"\n지출 TOP {args.top}")
+                for rank, (name, amount) in enumerate(ranked, 1):
+                    print(f"{rank}) {name} {amount}원")
+            else:
+                print("지출 내역이 없습니다.")
     elif args.command == "update":
         transaction_id = update_transaction(args.id, changes, categories, transactions)
         print(f"[수정 완료] id={transaction_id}")
