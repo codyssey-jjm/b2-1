@@ -1,7 +1,8 @@
-"""화면 출력과 파일 접근이 없는 거래·예산 필드 검증 함수."""
+"""화면 출력과 파일 접근이 없는 입력값 검증·변환 함수."""
 
 import re
 from datetime import date
+from typing import Literal, cast
 
 from .errors import ValidationError
 
@@ -52,12 +53,41 @@ def validate_amount(value: int) -> None:
         )
 
 
-def validate_transaction_type(value: str) -> None:
+def parse_positive_int(value: str) -> int:
+    try:
+        if (
+            not isinstance(value, str)
+            or re.fullmatch(r"[0-9]+", value.strip()) is None
+        ):
+            raise ValueError
+        number = int(value)
+        if number <= 0:
+            raise ValueError
+    except ValueError:
+        raise ValidationError(
+            "양수 정수를 입력해야 합니다.",
+            "0보다 큰 정수를 숫자로만 입력하세요. 예: 20, 15000",
+        ) from None
+    return number
+
+
+def validate_registered_category(value: str, names: list[str]) -> str:
+    validate_nonempty(value, "카테고리")
+    if value not in names:
+        raise ValidationError(
+            f"등록되지 않은 카테고리입니다: {value}",
+            "등록된 이름을 입력하세요. 새 이름은 category add로 먼저 등록하세요.",
+        )
+    return value
+
+
+def validate_transaction_type(value: str) -> Literal["income", "expense"]:
     if not isinstance(value, str) or value not in ("income", "expense"):
         raise ValidationError(
             "허용되지 않은 거래 타입입니다.",
             "수입은 income, 지출은 expense로 입력하세요.",
         )
+    return cast(Literal["income", "expense"], value)
 
 
 def parse_tags(value: str) -> tuple[str, ...]:

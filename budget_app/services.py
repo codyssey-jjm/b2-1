@@ -1,10 +1,19 @@
-"""입력·출력과 분리한 카테고리 업무 처리."""
+"""입력·출력과 분리한 카테고리·거래 업무 처리."""
 
 from contextlib import closing
 
 from .errors import AppError, ValidationError
+from .models import Transaction
 from .repositories import CategoryStore, TransactionRepository
-from .validators import validate_nonempty
+from .validators import validate_nonempty, validate_registered_category
+
+
+def add_transaction(
+    transaction: Transaction, categories: CategoryStore, transactions: TransactionRepository,
+) -> str:
+    validate_registered_category(transaction.category, categories.load())
+    transactions.insert(transaction)
+    return transaction.id
 
 
 def add_category(name: str, categories: CategoryStore) -> str:
