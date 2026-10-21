@@ -1,6 +1,8 @@
 """입력·출력과 분리한 카테고리·거래 업무 처리."""
 
 from contextlib import closing
+from dataclasses import replace
+from typing import Any
 
 from .errors import AppError, ValidationError
 from .models import Transaction
@@ -14,6 +16,28 @@ def add_transaction(
     validate_registered_category(transaction.category, categories.load())
     transactions.insert(transaction)
     return transaction.id
+
+
+def update_transaction(
+    transaction_id: str, changes: dict[str, Any],
+    categories: CategoryStore, transactions: TransactionRepository,
+) -> str:
+    validate_nonempty(transaction_id, "거래 ID")
+    if not changes or changes.keys() - {"date", "type", "category", "amount", "memo", "tags"}:
+        raise ValidationError(
+            "수정할 거래 필드가 올바르지 않습니다.",
+            "date, type, category, amount, memo, tags 중 하나 이상을 지정하세요. ID는 변경할 수 없습니다.",
+        )
+    transaction = replace(transactions.get(transaction_id), **changes)
+    validate_registered_category(transaction.category, categories.load())
+    transactions.update(transaction)
+    return transaction.id
+
+
+def delete_transaction(transaction_id: str, transactions: TransactionRepository) -> str:
+    validate_nonempty(transaction_id, "거래 ID")
+    transactions.delete(transaction_id)
+    return transaction_id
 
 
 def add_category(name: str, categories: CategoryStore) -> str:

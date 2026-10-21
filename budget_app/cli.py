@@ -11,10 +11,12 @@ from .decorators import handle_errors
 from .errors import ValidationError
 from .models import Transaction
 from .repositories import CategoryStore, TransactionRepository, initialize_stores
-from .services import add_category, add_transaction, remove_category
+from .services import (
+    add_category, add_transaction, delete_transaction, remove_category, update_transaction,
+)
 from .validators import (
     parse_date, parse_positive_int, parse_tags,
-    validate_registered_category, validate_transaction_type,
+    validate_nonempty, validate_registered_category, validate_transaction_type,
 )
 
 
@@ -83,10 +85,53 @@ def main(argv: list[str] | None) -> int:
         help="출력할 최대 거래 건수입니다. 양수 정수, 기본값: 20",
     )
 
+    updating = commands.add_parser(
+        "update", help="ID로 거래의 지정한 필드를 수정합니다.",
+        description="변경할 필드를 하나 이상 지정합니다. 생략한 필드는 유지합니다.",
+    )
+    update_options = updating.add_argument_group("수정 옵션")
+    update_options.add_argument("--id", required=True, metavar="ID", help="수정할 거래 ID입니다.")
+    update_options.add_argument(
+        "--date", type=parse_date, metavar="YYYY-MM-DD", help="변경할 날짜입니다.",
+    )
+    update_options.add_argument(
+        "--type", type=validate_transaction_type, metavar="income/expense", help="변경할 타입입니다.",
+    )
+    update_options.add_argument("--category", metavar="이름", help="등록된 카테고리 이름입니다.")
+    update_options.add_argument(
+        "--amount", type=parse_positive_int, metavar="금액", help="변경할 금액입니다. 양수 정수만 허용합니다.",
+    )
+    update_options.add_argument("--memo", metavar="메모", help='변경할 메모입니다. ""로 비웁니다.')
+    update_options.add_argument(
+        "--tags", type=parse_tags, metavar="태그", help='쉼표로 구분한 태그입니다. ""로 비웁니다.',
+    )
+    deleting = commands.add_parser(
+        "delete", help="ID로 거래 한 건을 삭제합니다.", description="지정한 ID의 거래를 삭제합니다.",
+    )
+    deleting.add_argument_group("삭제 옵션").add_argument(
+        "--id", required=True, metavar="ID", help="삭제할 거래 ID입니다.",
+    )
+
     args = parser.parse_args(argv)
     if args.command is None:
         parser.print_help()
         return 0
+
+    if args.command in {"update", "delete"}:
+        validate_nonempty(args.id, "거래 ID")
+    if args.command == "update":
+        changes = {
+            name: getattr(args, name)
+            for name in ("date", "type", "category", "amount", "memo", "tags")
+            if getattr(args, name) is not None
+        }
+        if not changes:
+            raise ValidationError(
+                "수정할 필드를 하나 이상 지정해야 합니다.",
+                "update --help로 변경할 필드 옵션을 확인하세요.",
+            )
+        if args.category is not None:
+            validate_nonempty(args.category, "카테고리")
 
     initialize_stores(args.data_dir)
     categories = CategoryStore(args.data_dir)
@@ -123,6 +168,12 @@ def main(argv: list[str] | None) -> int:
                     break
         if count == 0:
             print("거래 내역이 없습니다.")
+    elif args.command == "update":
+        transaction_id = update_transaction(args.id, changes, categories, transactions)
+        print(f"[수정 완료] id={transaction_id}")
+    elif args.command == "delete":
+        transaction_id = delete_transaction(args.id, transactions)
+        print(f"[삭제 완료] id={transaction_id}")
     elif args.category_action == "list":
         for name in categories.load():
             print(f"- {name}")

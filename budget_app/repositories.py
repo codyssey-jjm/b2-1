@@ -113,23 +113,55 @@ class TransactionRepository:
                 previous_key = key
                 yield transaction
 
+    def get(self, transaction_id: str) -> Transaction:
+        with closing(self.iter_transactions()) as existing:
+            for transaction in existing:
+                if transaction.id == transaction_id:
+                    return transaction
+        raise AppError(
+            f"없는 거래 ID입니다: {transaction_id}",
+            "list로 거래 ID를 확인하고 다시 실행하세요.",
+        )
+
     def insert(self, transaction: Transaction) -> None:
-        # ponytail: 삽입마다 전체 파일 재작성, 대량 가져오기 병목 시 일괄 병합으로 전환한다.
+        self._rewrite(transaction.id, transaction, require_existing=False)
+
+    def update(self, transaction: Transaction) -> None:
+        self._rewrite(transaction.id, transaction, require_existing=True)
+
+    def delete(self, transaction_id: str) -> None:
+        self._rewrite(transaction_id, None, require_existing=True)
+
+    def _rewrite(
+        self, transaction_id: str, transaction: Transaction | None, *, require_existing: bool,
+    ) -> None:
+        # ponytail: 변경마다 전체 파일 재작성, 대량 가져오기 병목 시 일괄 병합으로 전환한다.
         def records() -> Generator[JsonRecord, None, None]:
+            found = False
             inserted = False
-            key = _transaction_key(transaction)
             with closing(self.iter_transactions()) as existing:
                 for current in existing:
-                    if current.id == transaction.id:
-                        raise AppError(
-                            f"이미 존재하는 거래 ID입니다: {transaction.id}",
-                            "새 ID를 생성해 다시 저장하세요.",
-                        )
-                    if not inserted and key < _transaction_key(current):
+                    if current.id == transaction_id:
+                        if not require_existing or found:
+                            raise AppError(
+                                f"중복된 거래 ID입니다: {transaction_id}",
+                                "거래 ID를 확인하고 저장 파일의 중복 데이터를 정리하세요.",
+                            )
+                        found = True
+                        continue
+                    if (
+                        transaction is not None and not inserted
+                        and _transaction_key(transaction) < _transaction_key(current)
+                    ):
                         yield _transaction_record(transaction)
                         inserted = True
                     yield _transaction_record(current)
-            if not inserted:
+            if require_existing and not found:
+                raise AppError(
+                    f"없는 거래 ID입니다: {transaction_id}",
+                    "list로 거래 ID를 확인하고 다시 실행하세요.",
+                )
+            if transaction is not None and not inserted:
                 yield _transaction_record(transaction)
 
         _write_jsonl(self.path, records())
