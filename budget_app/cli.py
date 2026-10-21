@@ -10,14 +10,17 @@ from typing import Any, NoReturn, TypeVar
 from .decorators import handle_errors
 from .errors import ValidationError
 from .models import Transaction
-from .repositories import BudgetStore, CategoryStore, TransactionRepository, initialize_stores
+from .repositories import (
+    BudgetStore, CategoryStore, TransactionRepository, initialize_stores, validate_csv_destination,
+)
 from .services import (
-    add_category, add_transaction, delete_transaction, remove_category,
+    add_category, add_transaction, delete_transaction, export_transactions,
+    import_transactions, remove_category,
     search_transactions, set_budget, summarize_month, update_transaction,
 )
 from .validators import (
     parse_date, parse_positive_int, parse_tags,
-    validate_date_range, validate_month, validate_nonempty,
+    validate_date_range, validate_export_period, validate_month, validate_nonempty,
     validate_registered_category, validate_transaction_type,
 )
 
@@ -32,6 +35,11 @@ def _read_value(prompt: str, parse: Callable[[str], T]) -> T:
         except ValidationError as error:
             print(f"[오류] {error}", file=sys.stderr)
             print(f"[힌트] {error.hint}", file=sys.stderr)
+
+
+def _report_import_error(line_number: int, error: ValidationError) -> None:
+    print(f"[건너뜀] CSV {line_number}행: {error}", file=sys.stderr)
+    print(f"[힌트] {error.hint}", file=sys.stderr)
 
 
 class ArgumentParser(argparse.ArgumentParser):
@@ -175,6 +183,28 @@ def main(argv: list[str] | None) -> int:
                 help="월별 예산 금액입니다. 양수 정수만 허용합니다.",
             )
 
+    importing = commands.add_parser(
+        "import", help="CSV에서 유효한 거래를 건별로 가져옵니다.",
+        description="입력 오류 행은 건너뛰며, 읽기·저장 실패 시 앞서 반영한 거래는 유지합니다.",
+    )
+    importing.add_argument_group("입력 파일").add_argument(
+        "--from", dest="source", required=True, type=Path, metavar="CSV",
+        help="UTF-8 CSV 파일입니다. 필수 열: date,type,category,amount. 선택 열: memo,tags.",
+    )
+    exporting = commands.add_parser(
+        "export", help="월 또는 기간에 맞는 거래를 CSV로 내보냅니다.",
+        description="--month 또는 --from과 --to 한 쌍을 지정합니다. 두 조건은 함께 사용할 수 없습니다.",
+    )
+    export_options = exporting.add_argument_group("출력 파일과 기간")
+    export_options.add_argument("--out", required=True, type=Path, metavar="CSV", help="출력 CSV 경로입니다.")
+    export_options.add_argument("--month", metavar="YYYY-MM", help="내보낼 월입니다.")
+    export_options.add_argument(
+        "--from", dest="start_date", type=parse_date, metavar="YYYY-MM-DD", help="시작일을 포함합니다.",
+    )
+    export_options.add_argument(
+        "--to", dest="end_date", type=parse_date, metavar="YYYY-MM-DD", help="종료일을 포함합니다.",
+    )
+
     args = parser.parse_args(argv)
     if args.command is None:
         parser.print_help()
@@ -206,6 +236,10 @@ def main(argv: list[str] | None) -> int:
 
     if args.command in {"summary", "budget"}:
         validate_month(args.month)
+
+    if args.command == "export":
+        validate_export_period(args.month, args.start_date, args.end_date)
+        validate_csv_destination(args.out, args.data_dir)
 
     initialize_stores(args.data_dir)
     categories = CategoryStore(args.data_dir)
@@ -279,6 +313,16 @@ def main(argv: list[str] | None) -> int:
                 print(f"{rank}) {name} {amount}원")
         elif total_income > 0:
             print("지출 내역이 없습니다.")
+    elif args.command == "import":
+        imported, skipped = import_transactions(args.source, categories, transactions, _report_import_error)
+        print(f"[완료] imported={imported}, skipped={skipped}")
+        return 2 if skipped else 0
+    elif args.command == "export":
+        count = export_transactions(
+            args.out, categories, transactions,
+            month=args.month, start_date=args.start_date, end_date=args.end_date,
+        )
+        print(f"[완료] {args.out} ({count}건)")
     elif args.command == "budget":
         if args.budget_action == "set":
             amount = set_budget(args.month, args.amount, budgets)

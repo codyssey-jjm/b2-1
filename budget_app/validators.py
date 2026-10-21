@@ -53,6 +53,25 @@ def validate_month(value: str) -> None:
         ) from None
 
 
+def validate_export_period(
+    month: str | None, start_date: date | None, end_date: date | None,
+) -> None:
+    if month is not None:
+        if start_date is not None or end_date is not None:
+            raise ValidationError(
+                "월과 날짜 범위를 함께 지정할 수 없습니다.",
+                "--month 또는 --from과 --to 한 쌍만 지정하세요.",
+            )
+        validate_month(month)
+    elif start_date is None or end_date is None:
+        raise ValidationError(
+            "내보낼 월 또는 시작일·종료일 한 쌍이 필요합니다.",
+            "--month YYYY-MM 또는 --from YYYY-MM-DD --to YYYY-MM-DD를 지정하세요.",
+        )
+    else:
+        validate_date_range(start_date, end_date)
+
+
 def validate_amount(value: int) -> None:
     if type(value) is not int or value <= 0:
         raise ValidationError(

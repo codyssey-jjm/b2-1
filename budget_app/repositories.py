@@ -1,12 +1,13 @@
-"""JSONL 저장소와 원본을 보존하는 파일 교체."""
+"""JSONL·CSV 입출력과 원본을 보존하는 파일 교체."""
 
+import csv
 import json
 import os
 from collections.abc import Generator, Iterable
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any
+from typing import Any, TextIO
 from uuid import uuid4
 
 from .errors import AppError, ValidationError
@@ -15,6 +16,9 @@ from .validators import parse_date, validate_amount, validate_month, validate_no
 
 
 JsonRecord = dict[str, Any]
+CsvRecord = dict[str | None, Any]
+CSV_FIELDS = ("date", "type", "category", "amount", "memo", "tags")
+DATA_FILES = ("transactions.jsonl", "categories.jsonl", "budgets.jsonl")
 DEFAULT_CATEGORIES = ("food", "transport", "rent", "salary", "etc")
 
 
@@ -45,21 +49,82 @@ def _read_jsonl(path: Path) -> Generator[tuple[int, JsonRecord], None, None]:
         ) from None
 
 
-def _write_jsonl(path: Path, records: Generator[JsonRecord, None, None]) -> None:
+@contextmanager
+def _atomic_output(path: Path, *, newline: str | None = None) -> Generator[TextIO, None, None]:
     # ponytail: 단일 프로세스 쓰기 전제, 동시 쓰기가 필요하면 파일 잠금을 추가한다.
     temporary_path: Path | None = None
     try:
-        with closing(records), NamedTemporaryFile(
+        with NamedTemporaryFile(
             mode="w", encoding="utf-8", dir=path.parent,
-            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False, newline=newline,
         ) as output:
             temporary_path = Path(output.name)
-            for record in records:
-                output.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+            yield output
         os.replace(output.name, path)
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+
+
+def _write_jsonl(path: Path, records: Generator[JsonRecord, None, None]) -> None:
+    with _atomic_output(path) as output, closing(records):
+        for record in records:
+            output.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+
+
+def validate_csv_destination(path: Path, data_dir: Path) -> None:
+    destination = path.resolve()
+    for name in DATA_FILES:
+        stored = data_dir / name
+        if destination == stored.resolve() or (
+            path.exists() and stored.exists() and path.samefile(stored)
+        ):
+            raise ValidationError(
+                "저장 데이터 파일을 CSV 출력 경로로 사용할 수 없습니다.",
+                "transactions.jsonl, categories.jsonl, budgets.jsonl과 다른 출력 파일을 지정하세요.",
+            )
+
+
+def read_csv(path: Path) -> Generator[tuple[int, CsvRecord], None, None]:
+    with path.open(encoding="utf-8-sig", newline="") as source:
+        reader = csv.DictReader(source, strict=True)
+        try:
+            fields = reader.fieldnames
+            if (
+                not fields or len(fields) != len(set(fields))
+                or set(CSV_FIELDS[:4]) - set(fields) or set(fields) - set(CSV_FIELDS)
+            ):
+                raise ValidationError(
+                    f"{path} CSV 헤더가 올바르지 않습니다.",
+                    "필수 열 date,type,category,amount와 선택 열 memo,tags만 중복 없이 지정하세요.",
+                )
+            for record in reader:
+                yield reader.reader.line_num, record
+        except (csv.Error, UnicodeError) as error:
+            raise AppError(
+                f"{path}:{reader.reader.line_num} CSV 읽기에 실패했습니다: {error}",
+                "UTF-8 인코딩과 CSV의 따옴표·쉼표 형식을 확인하세요.",
+            ) from None
+
+
+def write_csv(path: Path, transactions: Generator[Transaction, None, None]) -> int:
+    count = 0
+    try:
+        with _atomic_output(path, newline="") as output, closing(transactions):
+            writer = csv.writer(output)
+            writer.writerow(CSV_FIELDS)
+            for transaction in transactions:
+                writer.writerow((
+                    transaction.date.isoformat(), transaction.type, transaction.category,
+                    transaction.amount, transaction.memo, ",".join(transaction.tags),
+                ))
+                count += 1
+    except (csv.Error, UnicodeError) as error:
+        raise AppError(
+            f"{path} CSV 쓰기에 실패했습니다: {error}",
+            "메모·태그의 문자열과 CSV 출력 형식을 확인하세요.",
+        ) from None
+    return count
 
 
 def _transaction_key(transaction: Transaction) -> tuple[int, str]:
@@ -233,7 +298,7 @@ class BudgetStore:
 
 def initialize_stores(data_dir: Path) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("transactions.jsonl", "categories.jsonl", "budgets.jsonl"):
+    for name in DATA_FILES:
         path = data_dir / name
         try:
             with path.open("x", encoding="utf-8"):

@@ -1,17 +1,22 @@
 """입력·출력과 분리한 카테고리·거래 업무 처리."""
 
-from collections.abc import Generator
+from calendar import monthrange
+from collections.abc import Callable, Generator
 from contextlib import closing
 from dataclasses import replace
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from .errors import AppError, ValidationError
 from .models import Transaction, TransactionType
-from .repositories import BudgetStore, CategoryStore, TransactionRepository
+from .repositories import (
+    BudgetStore, CategoryStore, TransactionRepository, read_csv, validate_csv_destination, write_csv,
+)
 from .validators import (
-    validate_amount, validate_date_range, validate_month,
-    validate_nonempty, validate_registered_category,
+    parse_date, parse_positive_int, parse_tags, validate_amount,
+    validate_date_range, validate_export_period, validate_month,
+    validate_nonempty, validate_registered_category, validate_transaction_type,
 )
 
 
@@ -90,6 +95,60 @@ def summarize_month(
                     expense_by_category.get(transaction.category, 0) + transaction.amount
                 )
     return total_income, total_expense, expense_by_category
+
+
+def import_transactions(
+    path: Path, categories: CategoryStore, transactions: TransactionRepository,
+    on_invalid: Callable[[int, ValidationError], None],
+) -> tuple[int, int]:
+    imported = skipped = 0
+    line_number = 0
+    try:
+        names = categories.load()
+        with closing(read_csv(path)) as records:
+            for line_number, record in records:
+                try:
+                    if None in record or any(value is None for value in record.values()):
+                        raise ValidationError(
+                            "CSV 행의 열 개수가 헤더와 다릅니다.",
+                            "메모·태그가 비어 있어도 헤더에 지정한 셀 개수에 맞게 작성하세요.",
+                        )
+                    transaction = Transaction(
+                        id=transactions.new_id(), date=parse_date(record["date"]),
+                        type=validate_transaction_type(record["type"]),
+                        category=validate_registered_category(record["category"], names),
+                        amount=parse_positive_int(record["amount"]),
+                        memo=record.get("memo", ""), tags=parse_tags(record.get("tags", "")),
+                    )
+                except ValidationError as error:
+                    skipped += 1
+                    on_invalid(line_number, error)
+                    continue
+                transactions.insert(transaction)
+                imported += 1
+    except (AppError, OSError) as error:
+        hint = error.hint if isinstance(error, AppError) else "입력 파일과 저장 경로의 권한·공간을 확인하세요."
+        error_type = ValidationError if isinstance(error, ValidationError) else AppError
+        raise error_type(
+            f"CSV 가져오기 중단: imported={imported}, skipped={skipped}. "
+            f"{path} (마지막으로 읽은 CSV 행: {line_number}): {error}",
+            hint,
+        ) from None
+    return imported, skipped
+
+
+def export_transactions(
+    path: Path, categories: CategoryStore, transactions: TransactionRepository, *,
+    month: str | None = None, start_date: date | None = None, end_date: date | None = None,
+) -> int:
+    validate_export_period(month, start_date, end_date)
+    validate_csv_destination(path, transactions.path.parent)
+    if month is not None:
+        start_date = date.fromisoformat(f"{month}-01")
+        end_date = start_date.replace(day=monthrange(start_date.year, start_date.month)[1])
+    return write_csv(path, search_transactions(
+        categories, transactions, start_date=start_date, end_date=end_date,
+    ))
 
 
 def set_budget(month: str, amount: int, budgets: BudgetStore) -> int:
