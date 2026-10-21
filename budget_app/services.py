@@ -44,12 +44,6 @@ def update_transaction(
     return transaction.id
 
 
-def delete_transaction(transaction_id: str, transactions: TransactionRepository) -> str:
-    validate_nonempty(transaction_id, "거래 ID")
-    transactions.delete(transaction_id)
-    return transaction_id
-
-
 def search_transactions(
     categories: CategoryStore, transactions: TransactionRepository, *,
     start_date: date | None = None, end_date: date | None = None,

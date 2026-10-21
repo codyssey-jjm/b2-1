@@ -14,7 +14,7 @@ from .repositories import (
     BudgetStore, CategoryStore, TransactionRepository, initialize_stores, validate_csv_destination,
 )
 from .services import (
-    add_category, add_transaction, delete_transaction, export_transactions,
+    add_category, add_transaction, export_transactions,
     import_transactions, remove_category,
     search_transactions, set_budget, summarize_month, update_transaction,
 )
@@ -337,8 +337,8 @@ def main(argv: list[str] | None) -> int:
         transaction_id = update_transaction(args.id, changes, categories, transactions)
         print(f"[수정 완료] id={transaction_id}")
     elif args.command == "delete":
-        transaction_id = delete_transaction(args.id, transactions)
-        print(f"[삭제 완료] id={transaction_id}")
+        transactions.delete(args.id)
+        print(f"[삭제 완료] id={args.id}")
     elif args.category_action == "list":
         for name in categories.load():
             print(f"- {name}")

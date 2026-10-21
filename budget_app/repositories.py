@@ -5,6 +5,7 @@ import json
 import os
 from collections.abc import Generator, Iterable
 from contextlib import closing, contextmanager
+from dataclasses import asdict
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, TextIO
@@ -132,15 +133,7 @@ def _transaction_key(transaction: Transaction) -> tuple[int, str]:
 
 
 def _transaction_record(transaction: Transaction) -> JsonRecord:
-    return {
-        "id": transaction.id,
-        "type": transaction.type,
-        "date": transaction.date.isoformat(),
-        "amount": transaction.amount,
-        "category": transaction.category,
-        "memo": transaction.memo,
-        "tags": list(transaction.tags),
-    }
+    return {**asdict(transaction), "date": transaction.date.isoformat()}
 
 
 class TransactionRepository:

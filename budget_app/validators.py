@@ -40,13 +40,10 @@ def validate_date_range(start_date: date | None, end_date: date | None) -> None:
 
 def validate_month(value: str) -> None:
     try:
-        if (
-            not isinstance(value, str)
-            or re.fullmatch(r"[0-9]{4}-[0-9]{2}", value) is None
-        ):
+        if not isinstance(value, str):
             raise ValueError
-        date.fromisoformat(f"{value}-01")
-    except ValueError:
+        parse_date(f"{value}-01")
+    except (ValueError, ValidationError):
         raise ValidationError(
             "월 형식이 올바르지 않습니다.",
             "YYYY-MM 형식의 유효한 월을 입력하세요. 예: 2024-01",
