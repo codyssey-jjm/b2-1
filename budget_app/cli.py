@@ -1,6 +1,7 @@
 """콘솔 입력 해석과 도움말 출력."""
 
 import argparse
+from pathlib import Path
 from typing import NoReturn
 
 from .decorators import handle_errors
@@ -22,8 +23,13 @@ def main(argv: list[str] | None) -> int:
         description="파일 기반 콘솔 가계부입니다.",
         add_help=False,
     )
-    parser.add_argument_group("옵션").add_argument(
+    options = parser.add_argument_group("옵션")
+    options.add_argument(
         "--help", action="help", help="사용 방법을 출력하고 종료합니다."
+    )
+    options.add_argument(
+        "--data-dir", type=Path, default=Path("./data"), metavar="경로",
+        help="데이터 저장 폴더를 지정합니다. 기본값: ./data",
     )
     parser.parse_args(argv)
     parser.print_help()

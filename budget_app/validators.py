@@ -1,4 +1,4 @@
-"""화면 출력과 파일 접근이 없는 거래 필드 검증 함수."""
+"""화면 출력과 파일 접근이 없는 거래·예산 필드 검증 함수."""
 
 import re
 from datetime import date
@@ -26,6 +26,21 @@ def parse_date(value: str) -> date:
         raise ValidationError(
             "날짜 형식이 올바르지 않거나 존재하지 않는 날짜입니다.",
             "YYYY-MM-DD 형식의 실제 날짜를 입력하세요. 예: 2024-01-15",
+        ) from None
+
+
+def validate_month(value: str) -> None:
+    try:
+        if (
+            not isinstance(value, str)
+            or re.fullmatch(r"[0-9]{4}-[0-9]{2}", value) is None
+        ):
+            raise ValueError
+        date.fromisoformat(f"{value}-01")
+    except ValueError:
+        raise ValidationError(
+            "월 형식이 올바르지 않습니다.",
+            "YYYY-MM 형식의 유효한 월을 입력하세요. 예: 2024-01",
         ) from None
 
 
