@@ -10,10 +10,10 @@ from typing import Any, NoReturn, TypeVar
 from .decorators import handle_errors
 from .errors import ValidationError
 from .models import Transaction
-from .repositories import CategoryStore, TransactionRepository, initialize_stores
+from .repositories import BudgetStore, CategoryStore, TransactionRepository, initialize_stores
 from .services import (
     add_category, add_transaction, delete_transaction, remove_category,
-    search_transactions, summarize_month, update_transaction,
+    search_transactions, set_budget, summarize_month, update_transaction,
 )
 from .validators import (
     parse_date, parse_positive_int, parse_tags,
@@ -143,7 +143,7 @@ def main(argv: list[str] | None) -> int:
 
     summary = commands.add_parser(
         "summary", help="월별 합계와 카테고리별 지출 순위를 조회합니다.",
-        description="지정한 월의 총수입·총지출·잔액과 지출 TOP N을 출력합니다.",
+        description="지정한 월의 합계·지출 TOP N·예산 사용률과 초과 여부를 출력합니다.",
     )
     summary_options = summary.add_argument_group("요약 옵션")
     summary_options.add_argument(
@@ -153,6 +153,27 @@ def main(argv: list[str] | None) -> int:
         "--top", type=parse_positive_int, default=5, metavar="N",
         help="출력할 최대 지출 카테고리 수입니다. 양수 정수, 기본값: 5. 동률은 이름순입니다.",
     )
+
+    budget = commands.add_parser(
+        "budget", help="월별 예산을 설정하거나 조회합니다.", description="월별 지출 예산을 관리합니다.",
+    )
+    budget_actions = budget.add_subparsers(
+        dest="budget_action", required=True, title="예산 명령",
+    )
+    for action, description in (
+        ("set", "지정한 월의 예산을 저장합니다. 기존 예산은 새 금액으로 변경합니다."),
+        ("show", "지정한 월의 예산을 조회합니다."),
+    ):
+        budget_command = budget_actions.add_parser(action, help=description, description=description)
+        budget_options = budget_command.add_argument_group("예산 옵션")
+        budget_options.add_argument(
+            "--month", required=True, metavar="YYYY-MM", help="설정하거나 조회할 월입니다.",
+        )
+        if action == "set":
+            budget_options.add_argument(
+                "--amount", required=True, type=parse_positive_int, metavar="금액",
+                help="월별 예산 금액입니다. 양수 정수만 허용합니다.",
+            )
 
     args = parser.parse_args(argv)
     if args.command is None:
@@ -183,12 +204,13 @@ def main(argv: list[str] | None) -> int:
             if value is not None:
                 validate_nonempty(value, field_name)
 
-    if args.command == "summary":
+    if args.command in {"summary", "budget"}:
         validate_month(args.month)
 
     initialize_stores(args.data_dir)
     categories = CategoryStore(args.data_dir)
     transactions = TransactionRepository(args.data_dir)
+    budgets = BudgetStore(args.data_dir)
     if args.command == "add":
         date = _read_value("날짜(YYYY-MM-DD): ", parse_date)
         transaction_type = _read_value("타입(income/expense): ", validate_transaction_type)
@@ -231,6 +253,7 @@ def main(argv: list[str] | None) -> int:
         if count == 0:
             print("조건에 맞는 거래가 없습니다." if args.command == "search" else "거래 내역이 없습니다.")
     elif args.command == "summary":
+        budget_amount = budgets.load().get(args.month)
         total_income, total_expense, expense_by_category = summarize_month(args.month, transactions)
         if total_income == 0 and total_expense == 0:
             print(f"{args.month} 거래 데이터가 없습니다.")
@@ -238,15 +261,34 @@ def main(argv: list[str] | None) -> int:
             print(f"총 수입: {total_income}원")
             print(f"총 지출: {total_expense}원")
             print(f"잔액: {total_income - total_expense}원")
-            if expense_by_category:
-                ranked = sorted(
-                    expense_by_category.items(), key=lambda item: (-item[1], item[0]),
-                )[:args.top]
-                print(f"\n지출 TOP {args.top}")
-                for rank, (name, amount) in enumerate(ranked, 1):
-                    print(f"{rank}) {name} {amount}원")
+        if budget_amount is None:
+            print("예산이 설정되어 있지 않습니다.")
+        else:
+            usage_tenths, remainder = divmod(total_expense * 1000, budget_amount)
+            if remainder * 2 >= budget_amount:
+                usage_tenths += 1
+            print(f"예산: {budget_amount}원 (사용률 {usage_tenths // 10}.{usage_tenths % 10}%)")
+            if total_expense > budget_amount:
+                print(f"[경고] 예산을 {total_expense - budget_amount}원 초과했습니다.")
+        if expense_by_category:
+            ranked = sorted(
+                expense_by_category.items(), key=lambda item: (-item[1], item[0]),
+            )[:args.top]
+            print(f"\n지출 TOP {args.top}")
+            for rank, (name, amount) in enumerate(ranked, 1):
+                print(f"{rank}) {name} {amount}원")
+        elif total_income > 0:
+            print("지출 내역이 없습니다.")
+    elif args.command == "budget":
+        if args.budget_action == "set":
+            amount = set_budget(args.month, args.amount, budgets)
+            print(f"[저장 완료] {args.month} 예산 {amount}원")
+        else:
+            amount = budgets.load().get(args.month)
+            if amount is None:
+                print(f"{args.month} 예산이 설정되어 있지 않습니다.")
             else:
-                print("지출 내역이 없습니다.")
+                print(f"{args.month} 예산: {amount}원")
     elif args.command == "update":
         transaction_id = update_transaction(args.id, changes, categories, transactions)
         print(f"[수정 완료] id={transaction_id}")
