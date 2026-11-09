@@ -496,16 +496,19 @@ cat ./demo-data/budgets.jsonl
 ### 카테고리 추가·조회·삭제
 
 ```bash
-# 사용하지 않는 시연삭제 카테고리 추가
-printf '시연삭제\n' | python -m budget_app --data-dir ./demo-data category add
+# 운동 카테고리 추가
+# 실행 후 입력: 운동
+python -m budget_app --data-dir ./demo-data category add
 # 카테고리 추가 결과 확인
 python -m budget_app --data-dir ./demo-data category list
-# 시연삭제 카테고리 삭제
-printf '시연삭제\n' | python -m budget_app --data-dir ./demo-data category remove
+# 운동 카테고리 삭제
+# 실행 후 입력: 운동
+python -m budget_app --data-dir ./demo-data category remove
 # 카테고리 삭제 결과 확인
 python -m budget_app --data-dir ./demo-data category list
 # 거래에서 사용 중인 food 카테고리의 삭제가 차단되는지 확인
-printf 'food\n' | python -m budget_app --data-dir ./demo-data category remove
+# 실행 후 입력: food
+python -m budget_app --data-dir ./demo-data category remove
 # 삭제가 차단된 food 카테고리가 목록에 남아 있는지 확인
 python -m budget_app --data-dir ./demo-data category list
 ```
