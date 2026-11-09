@@ -422,3 +422,106 @@ PY
 | `budget_app/__init__.py` | 패키지 정의 |
 
 거래 조회는 제너레이터로 한 건씩 읽습니다. 서비스·저장소는 직접 입력하거나 출력하지 않으며, `@handle_errors`가 예외를 메시지·종료 코드로 바꿉니다. 함수·모델에는 타입 힌트를 사용합니다.
+
+## 시연 명령어 예시
+
+### 거래 추가·조회·검색·수정·삭제와 CSV
+
+```bash
+# 월급 수입 300만 원 추가
+# 실행 후 질문에 차례로 입력: 2026-10-01 → income → salary → 3000000 → 월급 → salary
+python -m budget_app --data-dir ./demo-data add
+
+# 점심 지출 15,000원과 태그 meal, lunch 추가
+# 실행 후 질문에 차례로 입력: 2026-10-15 → expense → food → 15000 → 점심 → meal,lunch
+python -m budget_app --data-dir ./demo-data add
+
+# 교통비 지출 20,000원 추가
+# 실행 후 질문에 차례로 입력: 2026-10-20 → expense → transport → 20000 → 교통비 → bus
+python -m budget_app --data-dir ./demo-data add
+
+# 날짜가 최신인 거래부터 최대 3건 조회
+python -m budget_app --data-dir ./demo-data list --limit 3
+# 10월 지출 중 food 카테고리·점심 메모·meal 태그를 모두 만족하는 거래 검색
+python -m budget_app --data-dir ./demo-data search --from 2026-10-01 --to 2026-10-31 --category food --type expense --q 점심 --tag meal
+# 10월 수입·지출·잔액과 지출 상위 3개 카테고리 조회
+python -m budget_app --data-dir ./demo-data summary --month 2026-10 --top 3
+# 10월 거래를 demo-export.csv로 내보내기
+python -m budget_app --data-dir ./demo-data export --out ./demo-export.csv --month 2026-10
+# 내보낸 CSV를 별도 저장 폴더로 가져오기
+python -m budget_app --data-dir ./demo-import-data import --from ./demo-export.csv
+# 가져온 거래를 최신순으로 최대 3건 조회
+python -m budget_app --data-dir ./demo-import-data list --limit 3
+
+# 편집기로 demo-data/transactions.jsonl을 열어 교통비 거래의 id 값을 복사
+# 아래 명령의 "복사한ID"를 실제 값으로 바꿔 금액을 25,000원으로 바꾸고 메모 수정
+python -m budget_app --data-dir ./demo-data update --id "복사한ID" --amount 25000 --memo "교통비 수정"
+# 수정 결과를 거래 목록에서 확인
+python -m budget_app --data-dir ./demo-data list --limit 3
+# "복사한ID"를 수정할 때 사용한 실제 ID로 바꿔 해당 거래 삭제
+python -m budget_app --data-dir ./demo-data delete --id "복사한ID"
+# 삭제 결과를 거래 목록에서 확인
+python -m budget_app --data-dir ./demo-data list --limit 3
+# 존재하지 않는 ID를 수정했을 때 오류 확인
+python -m budget_app --data-dir ./demo-data update --id TX-NOT-FOUND --amount 1000
+# 존재하지 않는 ID를 삭제했을 때 오류 확인
+python -m budget_app --data-dir ./demo-data delete --id TX-NOT-FOUND
+```
+
+### 재실행 후 저장 데이터 확인
+
+```bash
+# 시연유지 카테고리 추가: printf로 대화형 입력값 전달
+printf '시연유지\n' | python -m budget_app --data-dir ./demo-data category add
+# 10월 예산 50만 원 저장
+python -m budget_app --data-dir ./demo-data budget set --month 2026-10 --amount 500000
+
+# 프로그램을 다시 실행해 저장된 거래 조회
+python -m budget_app --data-dir ./demo-data list --limit 10
+# 프로그램을 다시 실행해 저장된 카테고리 조회
+python -m budget_app --data-dir ./demo-data category list
+# 프로그램을 다시 실행해 저장된 10월 예산 조회
+python -m budget_app --data-dir ./demo-data budget show --month 2026-10
+
+# 거래·카테고리·예산 저장 파일 3개의 존재와 크기 확인
+ls -l ./demo-data/transactions.jsonl ./demo-data/categories.jsonl ./demo-data/budgets.jsonl
+# 거래 저장 파일의 실제 내용 확인
+cat ./demo-data/transactions.jsonl
+# 카테고리 저장 파일의 실제 내용 확인
+cat ./demo-data/categories.jsonl
+# 예산 저장 파일의 실제 내용 확인
+cat ./demo-data/budgets.jsonl
+```
+
+### 카테고리 추가·조회·삭제
+
+```bash
+# 사용하지 않는 시연삭제 카테고리 추가
+printf '시연삭제\n' | python -m budget_app --data-dir ./demo-data category add
+# 카테고리 추가 결과 확인
+python -m budget_app --data-dir ./demo-data category list
+# 시연삭제 카테고리 삭제
+printf '시연삭제\n' | python -m budget_app --data-dir ./demo-data category remove
+# 카테고리 삭제 결과 확인
+python -m budget_app --data-dir ./demo-data category list
+# 거래에서 사용 중인 food 카테고리의 삭제가 차단되는지 확인
+printf 'food\n' | python -m budget_app --data-dir ./demo-data category remove
+# 삭제가 차단된 food 카테고리가 목록에 남아 있는지 확인
+python -m budget_app --data-dir ./demo-data category list
+```
+
+### 월별 예산 설정과 초과 확인
+
+```bash
+# 10월 예산을 50만 원으로 설정
+python -m budget_app --data-dir ./demo-data budget set --month 2026-10 --amount 500000
+# 저장된 10월 예산 조회
+python -m budget_app --data-dir ./demo-data budget show --month 2026-10
+# 10월 요약에서 예산 사용률 확인
+python -m budget_app --data-dir ./demo-data summary --month 2026-10 --top 3
+
+# 10월 예산을 지출보다 적은 1만 원으로 변경
+python -m budget_app --data-dir ./demo-data budget set --month 2026-10 --amount 10000
+# 10월 요약에서 예산 사용률과 초과 경고 확인
+python -m budget_app --data-dir ./demo-data summary --month 2026-10 --top 3
+```
