@@ -2,3 +2,5 @@
 plan/
 AGENTS.md
 review/
+budget_app/__pycache__
+data/
